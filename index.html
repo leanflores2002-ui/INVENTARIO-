@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Inventario de Ropa — Vista por Producto</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    :root{
+      --bg:#e6f0fa; --card:#fff; --text:#2c3e50; --muted:#34495e; --brand:#3498db;
+      --ok:#2ecc71; --warn:#f39c12; --danger:#e74c3c; --table:#dfe6e9;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;padding:0;font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text)}
+    h1{margin:16px 0;text-align:center}
+    .app{
+      display:grid;
+      grid-template-columns: 280px 1fr;
+      gap:16px;
+      padding:16px;
+      max-width:1400px;
+      margin:0 auto;
+    }
+    .card{background:var(--card);border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.08);padding:16px}
+    /* Sidebar */
+    .sidebar h2{font-size:18px;margin:0 0 8px}
+    .sidebar .search{display:flex;gap:8px;margin-bottom:10px}
+    .sidebar input[type="text"]{flex:1;padding:10px;border:2px solid #bdc3c7;border-radius:8px}
+    .sidebar .btn{padding:10px;border:none;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer}
+    .sidebar .btn:hover{background:#2980b9}
+    .product-list{max-height:60vh;overflow:auto;border:1px solid #eee;border-radius:8px}
+    .product-item{display:flex;justify-content:space-between;align-items:center;padding:10px;border-bottom:1px solid #f2f2f2;cursor:pointer}
+    .product-item:hover{background:#f7fbff}
+    .product-item.active{background:#e8f4ff;border-left:4px solid var(--brand)}
+    .pill{font-size:12px;background:#eef6ff;color:#2c3e50;border-radius:999px;padding:2px 8px}
+    .sidebar .danger{background:var(--danger)}
+    .sidebar .danger:hover{background:#c0392b}
+
+    /* Main */
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    label{display:block;font-weight:600;margin-bottom:6px}
+    input,select,button{font-size:16px}
+    input,select{width:100%;padding:10px;border:2px solid #bdc3c7;border-radius:8px;background:#f9fbfc}
+    input:focus,select:focus{outline:none;border-color:var(--brand)}
+    .btn{width:100%;padding:12px;border:none;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer}
+    .btn:hover{background:#2980b9}
+    .btn.ok{background:var(--ok)} .btn.ok:hover{background:#27ae60}
+    .btn.warn{background:var(--warn)} .btn.warn:hover{background:#e67e22}
+    .btn.danger{background:var(--danger)} .btn.danger:hover{background:#c0392b}
+    .btn.ghost{background:#fff;color:var(--brand);border:2px solid var(--brand)}
+    .btn.small{padding:8px 10px;font-size:14px;width:auto}
+
+    .section-title{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{border:1px solid var(--table);padding:10px;text-align:left;background:#fff}
+    th{background:var(--brand);color:#fff}
+    .muted{color:#6b7b8c;font-size:13px}
+    .totals{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+    .stat{background:#f7fbff;border:1px solid #e7f0fb;border-radius:10px;padding:10px}
+    .stat .big{font-size:18px;font-weight:700}
+
+    @media (max-width: 1000px){
+      .app{grid-template-columns:1fr}
+      .grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <h1>Inventario de Ropa — por Producto</h1>
+  <div class="app">
+    <!-- SIDEBAR -->
+    <aside class="sidebar card">
+      <h2>Productos</h2>
+      <div class="search">
+        <input id="nuevoProductoNombre" type="text" placeholder="Ej: SHORT SAPLEX JASPEADO"/>
+        <button class="btn" onclick="crearProducto()">+ Crear</button>
+      </div>
+      <div class="row">
+        <button class="btn ghost small" onclick="exportarCSVProducto()">Exportar CSV (activo)</button>
+        <button class="btn ghost small" onclick="exportarCSVTodo()">Exportar CSV (todo)</button>
+      </div>
+      <div style="height:8px"></div>
+      <div class="product-list" id="listaProductos"></div>
+      <div style="height:12px"></div>
+      <div class="row">
+        <button class="btn danger" onclick="borrarProductoActivo()">Borrar Producto</button>
+        <button class="btn danger" onclick="borrarTodoInventario()">Borrar Todo</button>
+      </div>
+      <div style="height:12px"></div>
+      <div class="row">
+        <button class="btn warn" onclick="document.getElementById('csv-upload').click()">Importar CSV</button>
+        <input type="file" id="csv-upload" accept=".csv" style="display:none" onchange="importarCSV(this.files[0])"/>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="card">
+      <div class="grid">
+        <!-- Config básica del producto -->
+        <section class="card" style="padding:12px">
+          <div class="section-title">
+            <h3 style="margin:0;font-size:18px">Producto activo</h3>
+            <div id="badgeProducto" class="pill">—</div>
+          </div>
+          <div class="row">
+            <div style="flex:1">
+              <label>Nombre del Producto</label>
+              <input id="nombreProducto" list="nombresRecomendados" placeholder="Ej: SHORT SAPLEX JASPEADO" onblur="guardarMetaProducto()"/>
+              <datalist id="nombresRecomendados">
+                <option value="CALZA"><option value="BABUCHA"><option value="PANTALON">
+                <option value="PALAZO"><option value="TOP"><option value="CAMPERA">
+                <option value="BUZO"><option value="REMERA"><option value="CAMISETA">
+              </datalist>
+            </div>
+            <div style="flex:1">
+              <label>Tela</label>
+              <select id="telaProducto" onchange="guardarMetaProducto()">
+                <option value="">—</option>
+                <option value="LYCRA">LYCRA</option>
+                <option value="SAPLEX JASPEADO">SAPLEX JASPEADO</option>
+                <option value="ALGODON CON LYCRA">ALGODON CON LYCRA</option>
+                <option value="RUSTICO">RUSTICO</option>
+                <option value="MODAL">MODAL</option>
+                <option value="MORLEY">MORLEY</option>
+                <option value="JEAN">JEAN</option>
+                <option value="CORDERITO">CORDERITO</option>
+                <option value="JASPEADO">JASPEADO</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div style="flex:1">
+              <label>Temporada</label>
+              <select id="temporadaProducto" onchange="guardarMetaProducto()">
+                <option value="">—</option>
+                <option value="Verano">Verano</option>
+                <option value="Invierno">Invierno</option>
+                <option value="Todo el año">Todo el año</option>
+              </select>
+            </div>
+            <div style="flex:1">
+              <label>Tipo</label>
+              <select id="tipoProducto" onchange="guardarMetaProducto()">
+                <option value="">—</option>
+                <option value="Hombre">Hombre</option>
+                <option value="Mujer">Mujer</option>
+                <option value="Niño">Niño</option>
+              </select>
+            </div>
+          </div>
+          <p class="muted">Consejo: completá estos metadatos y después cargá cantidades en la matriz rápida.</p>
+        </section>
+
+        <!-- Totales -->
+        <section class="card" style="padding:12px">
+          <div class="section-title"><h3 style="margin:0;font-size:18px">Totales</h3></div>
+          <div class="totals">
+            <div class="stat"><div>Total general</div><div id="totGeneral" class="big">0</div></div>
+            <div class="stat"><div>Talles (T1..T8)</div><div id="totTalles" class="muted">—</div></div>
+            <div class="stat"><div>Colores (Top 5)</div><div id="totColores" class="muted">—</div></div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Matriz rápida -->
+      <section class="card" style="margin-top:16px;padding:12px">
+        <div class="section-title">
+          <h3 style="margin:0;font-size:18px">Matriz rápida (Color × Talles 1..8)</h3>
+          <button class="btn ok small" onclick="aplicarMatriz()">Agregar al inventario</button>
+        </div>
+        <div class="row">
+          <div style="flex:1">
+            <label>Color</label>
+            <input id="matColor" placeholder="Ej: gris"/>
+          </div>
+          <div style="flex:1">
+            <label>Accesos rápidos</label>
+            <div class="row">
+              <button class="btn ghost small" onclick="rellenarFila(0)">Vaciar</button>
+              <button class="btn ghost small" onclick="rellenarFila(1)">1 en todos</button>
+              <button class="btn ghost small" onclick="rellenarFila(2)">2 en todos</button>
+              <button class="btn ghost small" onclick="rellenarFila(5)">5 en todos</button>
+            </div>
+          </div>
+        </div>
+        <div style="overflow:auto;margin-top:8px">
+          <table>
+            <thead><tr><th>Talle</th><th>T1</th><th>T2</th><th>T3</th><th>T4</th><th>T5</th><th>T6</th><th>T7</th><th>T8</th></tr></thead>
+            <tbody>
+              <tr><th>Cant.</th>
+                <td><input id="t1" type="number" min="0" value="0"/></td>
+                <td><input id="t2" type="number" min="0" value="0"/></td>
+                <td><input id="t3" type="number" min="0" value="0"/></td>
+                <td><input id="t4" type="number" min="0" value="0"/></td>
+                <td><input id="t5" type="number" min="0" value="0"/></td>
+                <td><input id="t6" type="number" min="0" value="0"/></td>
+                <td><input id="t7" type="number" min="0" value="0"/></td>
+                <td><input id="t8" type="number" min="0" value="0"/></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted">Esto suma cantidades al producto activo. Si querés corregir una línea, editala en la tabla de abajo o cargá una nueva con valores negativos.</p>
+      </section>
+
+      <!-- Tabla del producto activo -->
+      <section class="card" style="margin-top:16px;padding:12px">
+        <div class="section-title">
+          <h3 style="margin:0;font-size:18px">Detalle del producto</h3>
+          <div class="row">
+            <button class="btn ghost small" onclick="exportarPDFProducto()">Exportar PDF</button>
+            <button class="btn ghost small" onclick="exportarCSVProducto()">Exportar CSV</button>
+          </div>
+        </div>
+        <div style="overflow:auto">
+          <table id="tablaProducto">
+            <thead>
+              <tr>
+                <th>Color</th><th>Talle</th><th>Cantidad</th>
+                <th>Tela</th><th>Temporada</th><th>Tipo</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="cuerpoProducto"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    // ======= Estado =======
+    let inventario = JSON.parse(localStorage.getItem('inventario')) || []; // plano: {id,nombre,cantidad,color,talle,tela,temporada,tipo}
+    let productoActivo = null; // nombre exacto del producto activo
+
+    // ======= Utilidades =======
+    const gid = () => '_' + Math.random().toString(36).slice(2,11);
+    const save = () => localStorage.setItem('inventario', JSON.stringify(inventario));
+
+    const productosUnicos = () => {
+      const set = new Set(inventario.map(p => (p.nombre||'').trim()).filter(Boolean));
+      return Array.from(set).sort((a,b)=>a.localeCompare(b));
+    };
+
+    const getMeta = (nombre) => {
+      // Busca el primer registro del producto para inferir meta
+      const p = inventario.find(x => x.nombre === nombre);
+      return {
+        tela: p?.tela || '',
+        temporada: p?.temporada || '',
+        tipo: p?.tipo || ''
+      };
+    };
+
+    const filtrarPorProducto = (nombre) => inventario.filter(p => p.nombre === nombre);
+
+    // ======= Sidebar / Productos =======
+    function renderProductos(){
+      const cont = document.getElementById('listaProductos');
+      cont.innerHTML = '';
+      const lista = productosUnicos();
+      if(lista.length === 0){
+        cont.innerHTML = '<div class="muted" style="padding:10px">No hay productos aún. Creá uno.</div>';
+        return;
+      }
+      lista.forEach(nom=>{
+        const items = filtrarPorProducto(nom);
+        const total = items.reduce((s,x)=>s + (parseInt(x.cantidad)||0), 0);
+        const div = document.createElement('div');
+        div.className = 'product-item' + (productoActivo===nom ? ' active' : '');
+        div.onclick = () => setProductoActivo(nom);
+        div.innerHTML = `
+          <div>
+            <div style="font-weight:600">${nom}</div>
+            <div class="muted">${items.length} líneas • Total: ${total}</div>
+          </div>
+          <span class="pill">${getMeta(nom).tela || '—'}</span>
+        `;
+        cont.appendChild(div);
+      });
+    }
+
+    function crearProducto(){
+      const nom = (document.getElementById('nuevoProductoNombre').value || '').trim();
+      if(!nom){ alert('Ingresá un nombre de producto.'); return; }
+      if(productosUnicos().includes(nom)){ setProductoActivo(nom); return; }
+      // Creamos una línea dummy 0 para registrar meta inicial
+      inventario.push({ id: gid(), nombre: nom, cantidad: 0, color: '—', talle: '—', tela: '', temporada: '', tipo: '' });
+      save();
+      setProductoActivo(nom);
+      document.getElementById('nuevoProductoNombre').value='';
+    }
+
+    function setProductoActivo(nombre){
+      productoActivo = nombre;
+      renderProductos();
+      renderMetaProducto();
+      renderTablaProducto();
+      renderTotales();
+    }
+
+    function borrarProductoActivo(){
+      if(!productoActivo){ alert('No hay producto activo.'); return; }
+      if(confirm(`⚠️ Vas a borrar TODAS las líneas del producto "${productoActivo}".\n\n¿Continuar?`)){
+        inventario = inventario.filter(p => p.nombre !== productoActivo);
+        save();
+        productoActivo = null;
+        renderProductos();
+        renderMetaProducto();
+        renderTablaProducto();
+        renderTotales();
+        alert('Producto borrado.');
+      }
+    }
+
+    function borrarTodoInventario(){
+      if(inventario.length===0){ alert('El inventario ya está vacío.'); return; }
+      if(confirm('⚠️ Atención: vas a borrar TODO el inventario.\n\n¿Continuar?')){
+        inventario = [];
+        save();
+        productoActivo = null;
+        renderProductos();
+        renderMetaProducto();
+        renderTablaProducto();
+        renderTotales();
+        alert('Inventario borrado.');
+      }
+    }
+
+    // ======= Meta del producto activo =======
+    function renderMetaProducto(){
+      const badge = document.getElementById('badgeProducto');
+      const nom = document.getElementById('nombreProducto');
+      const tela = document.getElementById('telaProducto');
+      const temporada = document.getElementById('temporadaProducto');
+      const tipo = document.getElementById('tipoProducto');
+
+      if(!productoActivo){
+        badge.textContent = '—';
+        nom.value = ''; tela.value=''; temporada.value=''; tipo.value='';
+        return;
+      }
+
+      const meta = getMeta(productoActivo);
+      badge.textContent = productoActivo || '—';
+      nom.value = productoActivo;
+      tela.value = meta.tela || '';
+      temporada.value = meta.temporada || '';
+      tipo.value = meta.tipo || '';
+    }
+
+    function guardarMetaProducto(){
+      if(!productoActivo) return;
+      const nuevoNombre = (document.getElementById('nombreProducto').value || '').trim();
+      const tela = document.getElementById('telaProducto').value;
+      const temporada = document.getElementById('temporadaProducto').value;
+      const tipo = document.getElementById('tipoProducto').value;
+
+      if(!nuevoNombre){
+        alert('El nombre del producto no puede estar vacío.');
+        renderMetaProducto();
+        return;
+      }
+
+      // Renombrar producto si cambió
+      if(nuevoNombre !== productoActivo){
+        inventario.forEach(p => { if(p.nombre === productoActivo) p.nombre = nuevoNombre; });
+        productoActivo = nuevoNombre;
+      }
+
+      // Actualizar meta en todas las líneas del producto
+      inventario.forEach(p => {
+        if(p.nombre === productoActivo){
+          p.tela = tela; p.temporada = temporada; p.tipo = tipo;
+        }
+      });
+      save();
+      renderProductos();
+      renderMetaProducto();
+      renderTablaProducto();
+      renderTotales();
+    }
+
+    // ======= Matriz rápida =======
+    function rellenarFila(v){
+      for(let i=1;i<=8;i++){ document.getElementById('t'+i).value = v; }
+    }
+
+    function aplicarMatriz(){
+      if(!productoActivo){ alert('Primero seleccioná o creá un producto.'); return; }
+      const color = (document.getElementById('matColor').value || '').trim();
+      if(!color){ alert('Ingresá un color.'); return; }
+
+      const meta = getMeta(productoActivo);
+      let agregadas = 0;
+      for(let i=1;i<=8;i++){
+        const v = parseInt(document.getElementById('t'+i).value || '0', 10);
+        if(!isNaN(v) && v !== 0){
+          inventario.push({
+            id: gid(),
+            nombre: productoActivo,
+            cantidad: v,
+            color: color,
+            talle: String(i),
+            tela: meta.tela || '',
+            temporada: meta.temporada || '',
+            tipo: meta.tipo || ''
+          });
+          agregadas++;
+        }
+      }
+      if(agregadas===0){
+        alert('No hay cantidades para agregar (todas son 0).');
+        return;
+      }
+      save();
+      renderTablaProducto();
+      renderTotales();
+      // limpiar inputs
+      document.getElementById('matColor').value='';
+      rellenarFila(0);
+    }
+
+    // ======= Tabla del producto activo =======
+    function renderTablaProducto(){
+      const cuerpo = document.getElementById('cuerpoProducto');
+      cuerpo.innerHTML = '';
+      if(!productoActivo) return;
+      const filas = filtrarPorProducto(productoActivo).filter(x => !(x.color==='—' && x.talle==='—')); // oculto dummy
+      if(filas.length===0){
+        cuerpo.innerHTML = '<tr><td colspan="7" class="muted">No hay líneas. Cargá cantidades con la Matriz rápida.</td></tr>';
+        return;
+      }
+      // Orden: color asc, talle asc
+      filas.sort((a,b)=>{
+        if(a.color.toLowerCase()===b.color.toLowerCase()){
+          return (parseInt(a.talle)||0) - (parseInt(b.talle)||0);
+        }
+        return a.color.localeCompare(b.color);
+      });
+      filas.forEach(p=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${p.color}</td>
+          <td>${p.talle}</td>
+          <td>
+            <input type="number" min="-9999" value="${p.cantidad}" style="width:90px"
+              onchange="editarCantidad('${p.id}', this.value)"/>
+          </td>
+          <td>${p.tela||'—'}</td>
+          <td>${p.temporada||'—'}</td>
+          <td>${p.tipo||'—'}</td>
+          <td>
+            <button class="btn small danger" onclick="eliminarLinea('${p.id}')">Eliminar</button>
+          </td>
+        `;
+        cuerpo.appendChild(tr);
+      });
+    }
+
+    function editarCantidad(id, val){
+      const n = parseInt(val,10);
+      if(isNaN(n)){ alert('Cantidad inválida'); renderTablaProducto(); return; }
+      const idx = inventario.findIndex(p=>p.id===id);
+      if(idx>=0){ inventario[idx].cantidad = n; save(); renderTotales(); }
+    }
+
+    function eliminarLinea(id){
+      if(!confirm('¿Eliminar esta línea?')) return;
+      inventario = inventario.filter(p=>p.id!==id);
+      save();
+      renderTablaProducto();
+      renderTotales();
+    }
+
+    // ======= Totales =======
+    function renderTotales(){
+      const tg = document.getElementById('totGeneral');
+      const tt = document.getElementById('totTalles');
+      const tc = document.getElementById('totColores');
+      if(!productoActivo){ tg.textContent='0'; tt.textContent='—'; tc.textContent='—'; return; }
+      const filas = filtrarPorProducto(productoActivo).filter(x => !(x.color==='—' && x.talle==='—'));
+      const total = filas.reduce((s,x)=>s+(parseInt(x.cantidad)||0),0);
+      tg.textContent = String(total);
+
+      const porTalle = {};
+      const porColor = {};
+      filas.forEach(x=>{
+        const t = x.talle; const c = x.color;
+        porTalle[t] = (porTalle[t]||0) + (parseInt(x.cantidad)||0);
+        porColor[c] = (porColor[c]||0) + (parseInt(x.cantidad)||0);
+      });
+      // T1..T8
+      const talles = [];
+      for(let i=1;i<=8;i++){ talles.push(`T${i}:${porTalle[i]||0}`); }
+      tt.textContent = talles.join('  •  ');
+
+      // top 5 colores
+      const top = Object.entries(porColor).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([c,v])=>`${c}:${v}`);
+      tc.textContent = top.length? top.join('  •  ') : '—';
+    }
+
+    // ======= Import/Export =======
+    function exportarCSVProducto(){
+      if(!productoActivo){ alert('Seleccioná un producto.'); return; }
+      const filas = filtrarPorProducto(productoActivo).filter(x => !(x.color==='—' && x.talle==='—'));
+      if(filas.length===0){ alert('No hay datos para exportar.'); return; }
+      let csv = 'Nombre|Cantidad|Color|Talle|Tela|Temporada|Tipo\n';
+      filas.forEach(p=>{
+        csv += `${p.nombre}|${p.cantidad}|${p.color}|${p.talle}|${p.tela||''}|${p.temporada||''}|${p.tipo||''}\n`;
+      });
+      descargarCSV(csv, `${productoActivo.replace(/\s+/g,'_').toLowerCase()}.csv`);
+    }
+
+    function exportarCSVTodo(){
+      if(inventario.length===0){ alert('No hay datos para exportar.'); return; }
+      let csv = 'Nombre|Cantidad|Color|Talle|Tela|Temporada|Tipo\n';
+      inventario.forEach(p=>{
+        if(p.color==='—' && p.talle==='—') return; // saltear dummy
+        csv += `${p.nombre}|${p.cantidad}|${p.color}|${p.talle}|${p.tela||''}|${p.temporada||''}|${p.tipo||''}\n`;
+      });
+      descargarCSV(csv, 'inventario_completo.csv');
+    }
+
+    function exportarPDFProducto(){
+      if(!productoActivo){ alert('Seleccioná un producto.'); return; }
+      const filas = filtrarPorProducto(productoActivo).filter(x => !(x.color==='—' && x.talle==='—'));
+      if(filas.length===0){ alert('No hay datos para exportar.'); return; }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation:'landscape' });
+      doc.setFontSize(18);
+      doc.text(`Inventario — ${productoActivo}`, 10, 20);
+      const tableData = filas.map(p=>[p.color,p.talle,p.cantidad,p.tela||'',p.temporada||'',p.tipo||'']);
+      doc.autoTable({
+        head: [['Color','Talle','Cantidad','Tela','Temporada','Tipo']],
+        body: tableData,
+        startY: 30, theme:'striped',
+        styles:{ fontSize:12, cellPadding:5 },
+        headStyles:{ fillColor:[52,152,219], textColor:[255,255,255], fontSize:14 }
+      });
+      doc.save(`${productoActivo.replace(/\s+/g,'_').toLowerCase()}.pdf`);
+    }
+
+    function descargarCSV(csv, nombre){
+      const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+      const link=document.createElement('a');
+      const url=URL.createObjectURL(blob);
+      link.href=url; link.download=nombre; link.style.visibility='hidden';
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    }
+
+    function importarCSV(file){
+      if(!file){ alert('No se seleccionó ningún archivo.'); return; }
+      const reader = new FileReader();
+      reader.onload = function(e){
+        const text = e.target.result;
+        const lines = text.split('\n').filter(l => l.trim() !== '');
+        let ok = 0;
+
+        lines.forEach((line, idx)=>{
+          if(idx === 0) return; // encabezado
+          const seps=[',','|']; let parts=null;
+          for(const s of seps){
+            parts=line.split(s).map(x=>x.trim());
+            if(parts.length>=7) break;
+          }
+          if(!parts || parts.length<7) return;
+
+          const [nombre, cantStr, color, talle, tela, temporada, tipo] = parts;
+          const cantidad = parseInt(cantStr,10);
+          const errores = [];
+          if(!nombre) errores.push('Nombre vacío');
+          if(isNaN(cantidad)) errores.push('Cantidad inválida');
+          if(!color) errores.push('Color vacío');
+          if(!talle) errores.push('Talle vacío');
+          if(errores.length) return;
+
+          inventario.push({
+            id: gid(), nombre, cantidad,
+            color, talle, tela, temporada, tipo
+          });
+          ok++;
+        });
+
+        if(ok===0){ alert('No se importaron filas válidas.'); return; }
+        save();
+        // Si hay un producto activo, refrescar su vista; si no, seleccionar el primero.
+        if(!productoActivo){
+          const lista = productosUnicos();
+          if(lista.length) productoActivo = lista[0];
+        }
+        renderProductos(); renderMetaProducto(); renderTablaProducto(); renderTotales();
+        alert(`Importadas ${ok} líneas.`);
+      };
+      reader.onerror = function(){ alert('Error al leer el archivo.'); };
+      reader.readAsText(file);
+    }
+
+    // ======= Inicio =======
+    (function init(){
+      // Si hay productos, seleccionar el primero
+      const lista = productosUnicos();
+      if(lista.length){ productoActivo = lista[0]; }
+      renderProductos();
+      renderMetaProducto();
+      renderTablaProducto();
+      renderTotales();
+    })();
+  </script>
+</body>
+</html>
